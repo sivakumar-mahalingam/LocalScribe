@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline Speech-to-Text</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .chat-bubble {
+            max-width: 75%;
+            word-wrap: break-word;
+        }
+        .user-bubble {
+            background-color: #3b82f6; /* blue-500 */
+            color: white;
+        }
+        /* Pulse animation for recording */
+        .recording-pulse {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex flex-col items-center justify-center h-screen">
+
+    <div class="w-full max-w-2xl h-full flex flex-col bg-white shadow-lg rounded-lg">
+        <!-- Header -->
+        <header class="bg-gray-800 text-white p-4 rounded-t-lg">
+            <h1 class="text-xl font-semibold text-center">Local Scribe</h1>
+            <p class="text-sm text-center text-gray-300">Speak into the mic, stop, and send your message.</p>
+        </header>
+
+        <!-- Chat Area -->
+        <main id="chat-area" class="flex-1 p-6 space-y-4 overflow-y-auto">
+            <!-- Example Bubble -->
+            <div class="flex justify-start">
+                <div class="chat-bubble p-3 rounded-lg bg-gray-200">
+                    <p>Click the microphone button to start recording your voice.</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Area -->
+        <footer class="p-4 border-t border-gray-200 bg-white rounded-b-lg">
+            <div class="flex items-center space-x-3">
+                <!-- Record Button -->
+                <button id="record-btn" class="p-3 rounded-full text-white bg-blue-500 hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors duration-200">
+                    <i id="record-icon" class="fas fa-microphone"></i>
+                </button>
+
+                <!-- Text Input -->
+                <input type="text" id="message-input" placeholder="Recording will appear here..." class="flex-1 p-3 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-400 transition">
+
+                <!-- Send Button -->
+                <button id="send-btn" class="p-3 rounded-full text-white bg-green-500 hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition-colors duration-200">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+            <p id="status" class="text-center text-sm text-gray-500 mt-2 h-4"></p>
+        </footer>
+    </div>
+
+    <script>
+        const recordBtn = document.getElementById('record-btn');
+        const recordIcon = document.getElementById('record-icon');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const chatArea = document.getElementById('chat-area');
+        const statusEl = document.getElementById('status');
+
+        let isRecording = false;
+        let mediaRecorder;
+        let audioChunks = [];
+
+        // --- Event Listeners ---
+        recordBtn.addEventListener('click', toggleRecording);
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault(); // Prevent form submission
+                sendMessage();
+            }
+        });
+
+        // --- Core Functions ---
+        async function toggleRecording() {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                await startRecording();
+            }
+        }
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = sendAudioToServer;
+
+                audioChunks = [];
+                mediaRecorder.start();
+                isRecording = true;
+                updateUIAfterStart();
+
+            } catch (error) {
+                console.error("Error accessing microphone:", error);
+                statusEl.textContent = "Error: Could not access microphone.";
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+                isRecording = false;
+                updateUIAfterStop();
+            }
+        }
+
+        async function sendAudioToServer() {
+            statusEl.textContent = 'Transcribing...';
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            const formData = new FormData();
+            formData.append('audio_data', audioBlob, 'recording.webm');
+
+            try {
+                // FIXED: Changed the URL to be absolute so the browser knows where to send the request.
+                const response = await fetch('http://127.0.0.1:5000/transcribe', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.statusText}`);
+                }
+
+                const result = await response.json();
+                if (result.text) {
+                    messageInput.value = result.text;
+                } else if(result.error) {
+                    throw new Error(result.error);
+                }
+
+            } catch (error) {
+                console.error('Transcription error:', error);
+                statusEl.textContent = `Error: ${error.message}`;
+            } finally {
+                if (statusEl.textContent === 'Transcribing...') {
+                    statusEl.textContent = '';
+                }
+            }
+        }
+
+        function sendMessage() {
+            const text = messageInput.value.trim();
+            if (text) {
+                addMessageToChat(text, 'user');
+                messageInput.value = '';
+            }
+        }
+
+        // --- UI Update Functions ---
+        function updateUIAfterStart() {
+            recordIcon.classList.remove('fa-microphone');
+            recordIcon.classList.add('fa-stop');
+            recordBtn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+            recordBtn.classList.add('bg-red-500', 'hover:bg-red-600', 'recording-pulse');
+            statusEl.textContent = 'Recording... Click the stop icon to finish.';
+            messageInput.value = ''; // Clear previous text
+            messageInput.placeholder = 'Recording in progress...';
+        }
+
+        function updateUIAfterStop() {
+            recordIcon.classList.remove('fa-stop');
+            recordIcon.classList.add('fa-microphone');
+            recordBtn.classList.remove('bg-red-500', 'hover:bg-red-600', 'recording-pulse');
+            recordBtn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+            statusEl.textContent = 'Processing audio...';
+            messageInput.placeholder = 'Recording will appear here...';
+        }
+
+        function addMessageToChat(message, sender) {
+            const messageDiv = document.createElement('div');
+            const bubbleDiv = document.createElement('div');
+            const paragraph = document.createElement('p');
+
+            paragraph.textContent = message;
+            bubbleDiv.appendChild(paragraph);
+            bubbleDiv.classList.add('chat-bubble', 'p-3', 'rounded-lg');
+
+            if (sender === 'user') {
+                messageDiv.classList.add('flex', 'justify-end');
+                bubbleDiv.classList.add('user-bubble');
+            } else {
+                messageDiv.classList.add('flex', 'justify-start');
+                bubbleDiv.classList.add('bg-gray-200');
+            }
+
+            messageDiv.appendChild(bubbleDiv);
+            chatArea.appendChild(messageDiv);
+
+            // Scroll to the latest message
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+    </script>
+</body>
+</html>
+
