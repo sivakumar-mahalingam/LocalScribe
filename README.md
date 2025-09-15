@@ -2,6 +2,8 @@
 
 LocalScribe is a private, offline speech-to-text web application. Powered by Python, Flask, and the Vosk toolkit, it allows you to transcribe audio directly in your browser without sending any data to the cloud. It features a simple, chatbot-style UI for easy recording and transcription, making it a secure tool for converting voice to text on your local machine.
 
+![LocalScribe](https://github.com/sivakumar-mahalingam/LocalScribe/raw/main/images/localscribe.png)
+
 ## Setup Instructions for Offline Speech-to-Text Web App
 
 Follow these steps carefully to run the application on your local machine.
